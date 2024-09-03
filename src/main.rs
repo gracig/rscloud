@@ -68,7 +68,7 @@ fn create_cloud(handle: &tokio::runtime::Handle) -> anyhow::Result<FPCloud> {
             assume_role: aws
                 .resource::<Role>("lambda_assume_role", Present, Default::default())?
                 .for_service("lambda.amazonaws.com")?,
-            functions: vec!["sample_echo1"],
+            functions: vec![RustLambdaEntry::new("rscloud", "sample_echo1")],
         },
     )?;
     let bucket = aws.resource::<Bucket>(
