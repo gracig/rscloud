@@ -1,3 +1,4 @@
+pub mod api;
 pub mod ec2;
 pub mod iam;
 pub mod lambda;
@@ -17,6 +18,7 @@ use super::{
     resource::{ResourceError, ResourceState, SharedResource},
 };
 use crate::prelude::*;
+use api::{resource::RestAPIResource, restapi::RestAPI};
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 use aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityOutput;
 use iam::{group::IAMGroup, user::IAMUser};
@@ -43,6 +45,8 @@ pub enum AwsType {
     Schedule,
     Group,
     User,
+    RestAPI,
+    RestAPIResource,
 }
 pub struct AwsProvider {
     plan: SharedPlan,
@@ -132,6 +136,8 @@ impl ResourceSerdeProvider for AwsProvider {
             AwsType::AttachGroupPolicy => r.serde(AttachGroupPolicy::manager(handle, config)),
             AwsType::User => r.serde(IAMUser::manager(handle, config)),
             AwsType::AttachUserPolicy => r.serde(AttachUserPolicy::manager(handle, config)),
+            AwsType::RestAPI => r.serde(RestAPI::manager(handle, config)),
+            AwsType::RestAPIResource => r.serde(RestAPIResource::manager(handle, config)),
         }
     }
 }
