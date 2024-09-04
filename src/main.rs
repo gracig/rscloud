@@ -1,11 +1,8 @@
 use std::env;
 
 use anyhow::{anyhow, Context};
-use rscloud::{
-    prelude::*,
-    v1::solutions::{self},
-};
-use serde_json::json;
+use api::integration::RestAPIIntegration;
+use rscloud::prelude::*;
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     let rt = tokio::runtime::Runtime::new()?;
@@ -37,158 +34,58 @@ fn print_usage(cmd: &str) {
 fn create_cloud(handle: &tokio::runtime::Handle) -> anyhow::Result<FPCloud> {
     let mut cloud = FPCloud::default();
     cloud.init_registry(handle.clone());
-    let aws = cloud.aws_provider(handle.clone(), "us-east-2");
-    let vpc = aws.resource::<Vpc>(
-        "my_vpc",
-        Present,
-        VpcInput {
-            cidr_block: Some("10.0.0.0/16".to_string()),
-            ..Default::default()
-        },
-    )?;
-    let _subnets = vpc.subnets(vec![
-        SubnetInput {
-            //availability_zone: ,
-            ..Default::default()
-        },
-        SubnetInput {
-            ..Default::default()
-        },
-        SubnetInput {
-            ..Default::default()
-        },
-        SubnetInput {
-            ..Default::default()
-        },
-    ])?;
+    let region = "us-east-2";
+    let aws = cloud.aws_provider(handle.clone(), region);
 
-    let rust_lambda_functions = solutions::lambda::rust_lambda_functions(
+    let functions = rust_lambda_functions(
         &aws,
-        solutions::lambda::RustLambdaInput {
+        RustLambdaInput {
             assume_role: aws
                 .resource::<Role>("lambda_assume_role", Present, Default::default())?
                 .for_service("lambda.amazonaws.com")?,
             functions: vec![RustLambdaEntry::new("rscloud", "sample_echo1")],
         },
     )?;
-    let bucket = aws.resource::<Bucket>(
-        "my_bucket",
+
+    let rest_api: RestAPI = aws.resource::<RestAPI>(
+        "myapi",
         Present,
-        BucketInput {
-            bucket: SerializableCreateBucketInput {
-                bucket: Some("fpco-test-bucket".to_owned()),
-                create_bucket_configuration: Some(SerializableCreateBucketConfiguration {
-                    location_constraint: Some(SerializableBucketLocationConstraint::UsEast2),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
+        RestAPIInput {
+            name: Some("myapi".to_string()),
+            description: Some("My API".to_string()),
             ..Default::default()
         },
     )?;
-    let file = aws.resource::<S3Object>(
-        "my_file",
-        Present,
-        S3ObjectInput {
-            key: Some("my_file".to_string()),
-            body: "Hello, world!".to_string().into_bytes(),
-            ..Default::default()
+
+    let echo_endpoint: RestAPIResource =
+        aws.resource::<RestAPIResource>("myapi_echo", Present, Default::default())?;
+
+    echo_endpoint.bind(&rest_api, |me, other| {
+        me.parent_id = other.root_resource_id.clone();
+        me.rest_api_id = other.id.clone();
+        me.path_part = Some("echo".to_string());
+    })?;
+
+    let echo_integration =
+        aws.resource::<RestAPIIntegration>("myapi_echo_integration", Present, Default::default())?;
+
+    echo_integration.bind(&echo_endpoint, |me, other| {
+        me.rest_api_id = other.rest_api_id.clone();
+        me.resource_id = other.id.clone();
+        me.http_method = Some("POST".to_string());
+        me.r#type = Some(SerializableIntegrationType::AwsProxy);
+    })?;
+
+    echo_integration.bind(
+        &functions.functions.get("sample_echo1").unwrap().function,
+        move |me, other| {
+            me.uri = Some(format!(
+                "arn:aws:apigateway:{}:lambda:path/2015-03-31/functions/{}/invocations",
+                region,
+                other.arn().unwrap()[0]
+            ));
         },
     )?;
-    file.bind_bucket(&bucket)?;
-    let state_machine_role = aws
-        .resource::<Role>("state-machine_role", Present, Default::default())?
-        .for_service("states.amazonaws.com")?;
-    rust_lambda_functions.grant_permission(&state_machine_role)?;
-    let _state_machine = aws
-        .resource::<StateMachine>(
-            "my_state_machine",
-            Present,
-            SerializableCreateStateMachineInput {
-                name: Some("my_state_machine".to_string()),
-                definition: Some(StateMachineDocument {
-                    comment: Some("Execute Lambda functions".to_string()),
-                    start_at: "FirstFunction".to_string(),
-                    states: vec![
-                        (
-                            String::from("FirstFunction"),
-                            State::Task(TaskState {
-                                next: Some("SecondFunction".to_string()),
-                                end: None,
-                                result_path: Some("$.data.first.output".to_string()),
-                                timeout_seconds: 300,
-                                heartbeat_seconds: 99999999,
-                                parameters: Some(json!({
-                                    "echo": "Echo"
-                                })),
-                                ..Default::default()
-                            }),
-                        ),
-                        (
-                            String::from("SecondFunction"),
-                            State::Task(TaskState {
-                                next: Some("ThirdFunction".to_string()),
-                                end: None,
-                                result_path: Some("$.data.second.output".to_string()),
-                                timeout_seconds: 300,
-                                heartbeat_seconds: 99999999,
-                                parameters: Some(json!({
-                                    "echo.$": "$.data.first.output.body"
-                                })),
-                                ..Default::default()
-                            }),
-                        ),
-                        (
-                            String::from("ThirdFunction"),
-                            State::Task(TaskState {
-                                result_path: Some("$.data.third.output".to_string()),
-                                next: None,
-                                end: Some(true),
-                                timeout_seconds: 300,
-                                heartbeat_seconds: 99999999,
-                                parameters: Some(json!({
-                                    "echo.$": "$.data.second.output.body"
-                                })),
-                                ..Default::default()
-                            }),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
-                }),
-                r#type: Some(SerializableStateMachineType::Standard),
-                logging_configuration: Some(SerializableLoggingConfigurationForSM {
-                    level: Some(SerializableLogLevelForSM::All),
-                    include_execution_data: true,
-                    destinations: None,
-                }),
-                ..Default::default()
-            },
-        )?
-        .bind_role(&state_machine_role)?
-        .bind_function(
-            "FirstFunction",
-            &rust_lambda_functions.functions["sample_echo1"].function,
-        )?
-        .bind_function(
-            "SecondFunction",
-            &rust_lambda_functions.functions["sample_echo1"].function,
-        )?
-        .bind_function(
-            "ThirdFunction",
-            &rust_lambda_functions.functions["sample_echo1"].function,
-        )?;
-
-    /*
-    {
-      "data": {
-        "input": {
-            "echo": "Echo"
-        }
-      }
-    }
-
-             */
 
     Ok(cloud)
 }

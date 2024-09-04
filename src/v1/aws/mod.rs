@@ -18,7 +18,7 @@ use super::{
     resource::{ResourceError, ResourceState, SharedResource},
 };
 use crate::prelude::*;
-use api::{resource::RestAPIResource, restapi::RestAPI};
+use api::{integration::RestAPIIntegration, resource::RestAPIResource, restapi::RestAPI};
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 use aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityOutput;
 use iam::{group::IAMGroup, user::IAMUser};
@@ -47,6 +47,7 @@ pub enum AwsType {
     User,
     RestAPI,
     RestAPIResource,
+    RestAPIIntegration,
 }
 pub struct AwsProvider {
     plan: SharedPlan,
@@ -138,6 +139,7 @@ impl ResourceSerdeProvider for AwsProvider {
             AwsType::AttachUserPolicy => r.serde(AttachUserPolicy::manager(handle, config)),
             AwsType::RestAPI => r.serde(RestAPI::manager(handle, config)),
             AwsType::RestAPIResource => r.serde(RestAPIResource::manager(handle, config)),
+            AwsType::RestAPIIntegration => r.serde(RestAPIIntegration::manager(handle, config)),
         }
     }
 }

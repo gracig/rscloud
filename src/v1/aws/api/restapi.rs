@@ -80,14 +80,15 @@ impl RestAPIManager {
                     Ok(response) => {
                         if let Some(mut items) = response.items {
                             for item in items.into_iter() {
+                                println!("Comparing {:?} with {:?}", item.name, name);
                                 if item.name == name {
-                                    return Ok(item);
+                                    return Ok(Some(item.into()));
                                 }
                             }
                         }
                         next_token = response.position;
                         if next_token.is_none() {
-                            return Err(ManagerError::LookupFail("Rest API not found".to_string()));
+                            return Ok(None);
                         }
                     }
                     Err(e) => {
@@ -96,7 +97,7 @@ impl RestAPIManager {
                 }
             }
         })?;
-        Ok(Some(api.into()))
+        Ok(api)
     }
 
     fn create(

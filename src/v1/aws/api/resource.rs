@@ -1,23 +1,23 @@
 use std::collections::HashMap;
 
+use crate::prelude::AwsManager;
+use crate::{
+    prelude::{AwsResource, AwsResourceCreator},
+    v1::manager::{ManagerError, ResourceManager},
+};
 use aws_sdk_apigateway::{
     operation::{
         create_resource::builders::CreateResourceFluentBuilder, get_resource::GetResourceOutput,
         update_resource::builders::UpdateResourceFluentBuilder,
     },
     types::{
-        builders::PatchOperationBuilder, ConnectionType, ContentHandlingStrategy, Integration,
-        IntegrationResponse, IntegrationType, Method, MethodResponse, Op, TlsConfig,
+        builders::{IntegrationResponseBuilder, PatchOperationBuilder, TlsConfigBuilder},
+        ConnectionType, ContentHandlingStrategy, Integration, IntegrationResponse, IntegrationType,
+        Method, MethodResponse, Op, TlsConfig,
     },
     Client,
 };
 use serde::{Deserialize, Serialize};
-
-use crate::prelude::AwsManager;
-use crate::{
-    prelude::{AwsResource, AwsResourceCreator},
-    v1::manager::{ManagerError, ResourceManager},
-};
 
 pub type RestAPIResourceInput = SerializableResourceInput;
 pub type RestAPIResourceOutput = SerializableGetResourceOutput;
@@ -30,7 +30,7 @@ impl AwsResourceCreator for RestAPIResource<'_> {
     type Input = RestAPIResourceInput;
     type Output = RestAPIResourceOutput;
     fn r#type() -> crate::prelude::AwsType {
-        crate::prelude::AwsType::RestAPI
+        crate::prelude::AwsType::RestAPIResource
     }
     fn manager(
         handle: &tokio::runtime::Handle,
@@ -58,7 +58,7 @@ impl RestAPIResourceManager {
                 .map(RestAPIResourceOutput::from)
                 .map(Some)
                 .or_else(|e| match e {
-                    ManagerError::LookupFail(ref msg) if msg.contains("not found") => Ok(None),
+                    ManagerError::LookupFail(ref msg) if msg.contains("NotFound") => Ok(None),
                     _ => Err(e),
                 })
         })
@@ -78,18 +78,20 @@ impl RestAPIResourceManager {
                 if let Some(ref token) = next_token {
                     request = request.position(token);
                 }
+                let path = path.as_ref().map(|p| format!("/{}", p));
                 match request.send().await {
                     Ok(response) => {
                         if let Some(mut items) = response.items {
                             for item in items.into_iter() {
+                                println!("{:?} with {:?}", item.path, path);
                                 if item.path == path {
-                                    return Ok(item);
+                                    return Ok(Some(item.into()));
                                 }
                             }
                         }
                         next_token = response.position;
                         if next_token.is_none() {
-                            return Err(ManagerError::LookupFail("Resource not found".to_string()));
+                            return Ok(None);
                         }
                     }
                     Err(e) => {
@@ -98,7 +100,7 @@ impl RestAPIResourceManager {
                 }
             }
         })?;
-        Ok(Some(api.into()))
+        Ok(api)
     }
 
     fn create(
@@ -118,7 +120,7 @@ impl RestAPIResourceManager {
         let mut response = match self.lookup(input.parent_id.clone(), response.id.clone()) {
             Ok(Some(api)) => Ok(api),
             Ok(None) => Err(ManagerError::CreateFail(
-                "Policy create but not found".to_string(),
+                "Resource created but not found".to_string(),
             )),
             Err(e) => Err(e),
         }?;
@@ -336,6 +338,13 @@ impl From<TlsConfig> for SerializableTlsConfig {
         }
     }
 }
+impl From<SerializableTlsConfig> for TlsConfig {
+    fn from(value: SerializableTlsConfig) -> Self {
+        TlsConfigBuilder::default()
+            .insecure_skip_verification(value.insecure_skip_verification)
+            .build()
+    }
+}
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct SerializableIntegrationResponse {
@@ -359,6 +368,17 @@ impl From<IntegrationResponse> for SerializableIntegrationResponse {
         }
     }
 }
+impl From<SerializableIntegrationResponse> for IntegrationResponse {
+    fn from(value: SerializableIntegrationResponse) -> Self {
+        IntegrationResponseBuilder::default()
+            .set_status_code(value.status_code)
+            .set_selection_pattern(value.selection_pattern)
+            .set_response_parameters(value.response_parameters)
+            .set_response_templates(value.response_templates)
+            .set_content_handling(value.content_handling.map(ContentHandlingStrategy::from))
+            .build()
+    }
+}
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub enum SerializableContentHandlingStrategy {
@@ -380,6 +400,20 @@ impl From<ContentHandlingStrategy> for SerializableContentHandlingStrategy {
         }
     }
 }
+impl From<SerializableContentHandlingStrategy> for ContentHandlingStrategy {
+    fn from(value: SerializableContentHandlingStrategy) -> Self {
+        match value {
+            SerializableContentHandlingStrategy::ConvertToBinary => {
+                ContentHandlingStrategy::ConvertToBinary
+            }
+            SerializableContentHandlingStrategy::ConvertToText => {
+                ContentHandlingStrategy::ConvertToText
+            }
+            _ => ContentHandlingStrategy::ConvertToText,
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub enum SerializableConnectionType {
     #[default]
@@ -393,6 +427,15 @@ impl From<ConnectionType> for SerializableConnectionType {
             ConnectionType::Internet => SerializableConnectionType::Internet,
             ConnectionType::VpcLink => SerializableConnectionType::VpcLink,
             _ => SerializableConnectionType::Unknown,
+        }
+    }
+}
+impl From<SerializableConnectionType> for ConnectionType {
+    fn from(value: SerializableConnectionType) -> Self {
+        match value {
+            SerializableConnectionType::Internet => ConnectionType::Internet,
+            SerializableConnectionType::VpcLink => ConnectionType::VpcLink,
+            _ => ConnectionType::Internet,
         }
     }
 }
@@ -416,6 +459,18 @@ impl From<IntegrationType> for SerializableIntegrationType {
             IntegrationType::HttpProxy => SerializableIntegrationType::HttpProxy,
             IntegrationType::Mock => SerializableIntegrationType::Mock,
             _ => SerializableIntegrationType::Unknown,
+        }
+    }
+}
+impl From<SerializableIntegrationType> for IntegrationType {
+    fn from(value: SerializableIntegrationType) -> Self {
+        match value {
+            SerializableIntegrationType::Aws => IntegrationType::Aws,
+            SerializableIntegrationType::AwsProxy => IntegrationType::AwsProxy,
+            SerializableIntegrationType::Http => IntegrationType::Http,
+            SerializableIntegrationType::HttpProxy => IntegrationType::HttpProxy,
+            SerializableIntegrationType::Mock => IntegrationType::Mock,
+            _ => IntegrationType::Aws,
         }
     }
 }
