@@ -60,7 +60,7 @@ impl RestAPIManager {
                 .map(RestAPIOutput::from)
                 .map(Some)
                 .or_else(|e| match e {
-                    ManagerError::LookupFail(ref msg) if msg.contains("NotFound") => Ok(None),
+                    ManagerError::LookupFail(ref msg) if msg.contains("not found") => Ok(None),
                     _ => Err(e),
                 })
         })
