@@ -225,26 +225,6 @@ pub struct SerializableGetIntegrationOutput {
     pub tls_config: Option<SerializableTlsConfig>,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone)]
-
-pub struct SerializableIntegration {
-    pub r#type: Option<SerializableIntegrationType>,
-    pub http_method: Option<String>,
-    pub uri: Option<String>,
-    pub connection_type: Option<SerializableConnectionType>,
-    pub connection_id: Option<String>,
-    pub credentials: Option<String>,
-    pub request_parameters: Option<HashMap<String, String>>,
-    pub request_templates: Option<HashMap<String, String>>,
-    pub passthrough_behavior: Option<String>,
-    pub content_handling: Option<SerializableContentHandlingStrategy>,
-    pub timeout_in_millis: i32,
-    pub cache_namespace: Option<String>,
-    pub cache_key_parameters: Option<Vec<String>>,
-    pub integration_responses: Option<HashMap<String, SerializableIntegrationResponse>>,
-    pub tls_config: Option<SerializableTlsConfig>,
-}
-
 impl SerializablePutIntegrationInput {
     pub fn to_aws_input(self, client: &Client) -> anyhow::Result<PutIntegrationFluentBuilder> {
         Ok(client

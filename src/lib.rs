@@ -2,7 +2,7 @@ pub mod v1;
 
 pub mod prelude {
     pub use crate::v1::aws::{
-        api::{resource::*, restapi::*},
+        api::{integration::*, resource::*, restapi::*},
         ec2::{subnet::*, vpc::*, *},
         iam::{
             attach_group_policy::*, attach_role_policy::*, attach_user_policy::*, group::*,
